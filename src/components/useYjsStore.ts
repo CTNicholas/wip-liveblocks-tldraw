@@ -9,7 +9,6 @@ import {
   createTLStore,
   defaultShapeUtils,
   defaultUserPreferences,
-  getUserPreferences,
   react,
   transact,
 } from "@tldraw/tldraw";
@@ -24,11 +23,18 @@ import { useRoom } from "@/liveblocks.config";
 export function useYjsStore({
   roomId = "my-liveblocks-room",
   shapeUtils = [],
+  user,
 }: Partial<{
   hostUrl: string;
   roomId: string;
   version: number;
   shapeUtils: TLAnyShapeUtilConstructor[];
+  user: {
+    // Use Computed type here
+    id: string;
+    color: string;
+    name: string;
+  };
 }>) {
   const [store] = useState(() => {
     const store = createTLStore({
@@ -128,33 +134,27 @@ export function useYjsStore({
       yStore.on("change", handleChange);
       unsubs.push(() => yStore.off("change", handleChange));
 
-      /* -------------------- Awareness ------------------- */
-
       const userPreferences = computed<{
         id: string;
         color: string;
         name: string;
       }>("userPreferences", () => {
-        const user = getUserPreferences();
+        if (!user) {
+          // Ths is here to make the typescript compiler happy.
+          throw new Error("Failed to get user");
+        }
         return {
           id: user.id,
-          color: user.color ?? defaultUserPreferences.color,
-          name: user.name ?? defaultUserPreferences.name,
+          color: user.color,
+          name: user.name,
         };
       });
 
-      // Honestly not 100% sure if this is right or not.
-      const yClientId = room.awareness.doc.clientID.toString();
+      // TODO - Confirm if this is the proper yClientId. Absolutely not sure
+      const self = liveblocksRoom.getSelf();
+      // @ts-ignore
+      const yClientId = self?.presence.__yjs_clientid;
       const presenceId = InstancePresenceRecordType.createId(yClientId);
-
-      // const peerPresence = InstancePresenceRecordType.create({
-      // 	id: presenceId,
-      // 	currentPageId: editor.getCurrentPageId(),
-      // 	userId: 'peer-1',
-      // 	userName: 'test user',
-      // 	cursor: { x: 0, y: 0, type: 'default', rotation: 0 },
-      // 	chatMessage: 'test message',
-      // })
 
       const presenceDerivation =
         createPresenceStateDerivation(userPreferences)(store);
@@ -162,7 +162,6 @@ export function useYjsStore({
       // Set our initial presence from the derivation's current value
       // This seemingly works but the typing is a mismatch between JsonObject and TLInstancePresence.
       // Not sure if that's a problem or not
-
       room.awareness.setLocalStateField(
         "presence",
         // @ts-ignore
