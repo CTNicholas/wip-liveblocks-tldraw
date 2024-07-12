@@ -16,11 +16,13 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { YKeyValue } from "y-utility/y-keyvalue";
 import * as Y from "yjs";
-import LiveblocksProvider from "@liveblocks/yjs";
+// import LiveblocksProvider from "@liveblocks/yjs";
+import { LiveblocksYjsProvider } from "@liveblocks/yjs";
+
 import { useRoom } from "@/liveblocks.config";
 
 export function useYjsStore({
-  roomId = "example",
+  roomId = "my-liveblocks-room",
   shapeUtils = [],
 }: Partial<{
   hostUrl: string;
@@ -49,7 +51,7 @@ export function useYjsStore({
     return {
       yDoc,
       yStore,
-      room: new LiveblocksProvider(liveblocksRoom, yDoc),
+      room: new LiveblocksYjsProvider(liveblocksRoom, yDoc),
     };
   }, [liveblocksRoom, roomId]);
 
@@ -141,20 +143,39 @@ export function useYjsStore({
         };
       });
 
-      // Create the instance presence derivation
-      const yClientId = room.awareness.clientID.toString();
+      // Honestly not 100% sure if this is right or not.
+      const yClientId = room.awareness.doc.clientID.toString();
       const presenceId = InstancePresenceRecordType.createId(yClientId);
+
+      // const peerPresence = InstancePresenceRecordType.create({
+      // 	id: presenceId,
+      // 	currentPageId: editor.getCurrentPageId(),
+      // 	userId: 'peer-1',
+      // 	userName: 'test user',
+      // 	cursor: { x: 0, y: 0, type: 'default', rotation: 0 },
+      // 	chatMessage: 'test message',
+      // })
+
       const presenceDerivation =
         createPresenceStateDerivation(userPreferences)(store);
 
       // Set our initial presence from the derivation's current value
-      room.awareness.setLocalStateField("presence", presenceDerivation.value);
+      // This seemingly works but the typing is a mismatch between JsonObject and TLInstancePresence.
+      // Not sure if that's a problem or not
+
+      room.awareness.setLocalStateField(
+        "presence",
+        // @ts-ignore
+        presenceDerivation.get() ?? null
+      );
 
       // When the derivation change, sync presence to to yjs awareness
       unsubs.push(
         react("when presence changes", () => {
-          const presence = presenceDerivation.value;
+          const presence = presenceDerivation.get() ?? null;
           requestAnimationFrame(() => {
+            // See above for ts-ignore comments.
+            // @ts-ignore
             room.awareness.setLocalStateField("presence", presence);
           });
         })
@@ -197,8 +218,12 @@ export function useYjsStore({
 
         // put / remove the records in the store
         store.mergeRemoteChanges(() => {
-          if (toRemove.length) store.remove(toRemove);
-          if (toPut.length) store.put(toPut);
+          if (toRemove.length > 0) {
+            store.remove(toRemove);
+          }
+          if (toPut.length > 0) {
+            store.put(toPut);
+          }
         });
       };
 
@@ -233,40 +258,8 @@ export function useYjsStore({
       });
     }
 
-    // Replaced the code below with these two lines - Chris
     room.on("synced", handleSync);
     unsubs.push(() => room.off("synced", handleSync));
-
-    // let hasConnectedBefore = false;
-
-    // function handleStatusChange({
-    //   status = "connected",
-    // }: {
-    //   status: "disconnected" | "connected";
-    // }) {
-    //   // If we're disconnected, set the store status to 'synced-remote' and the connection status to 'offline'
-    //   if (status === "disconnected") {
-    //     setStoreWithStatus({
-    //       store,
-    //       status: "synced-remote",
-    //       connectionStatus: "offline",
-    //     });
-    //     return;
-    //   }
-    //
-    //   room.off("synced", handleSync);
-    //
-    //   if (status === "connected") {
-    //     if (hasConnectedBefore) return;
-    //     hasConnectedBefore = true;
-    //     room.on("synced", handleSync);
-    //     unsubs.push(() => room.off("synced", handleSync));
-    //   }
-    // }
-    //
-    // room.on("status", handleStatusChange);
-    // unsubs.push(() => room.off("status", handleStatusChange));
-
     return () => {
       unsubs.forEach((fn) => fn());
       unsubs.length = 0;
