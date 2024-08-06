@@ -1,4 +1,6 @@
-Quick tldraw + Liveblocks Yjs demo. Improvements made by [@jcollingj](https://github.com/jcollingj).
+## tldraw + Liveblocks Yjs 
+
+WIP—it's a bit laggy. Improvements made by [@jcollingj](https://github.com/jcollingj).
 
 ### Set up Liveblocks
 
