@@ -11,7 +11,6 @@ import {
   defaultUserPreferences,
   getUserPreferences,
   react,
-  transact,
   TLStoreEventInfo,
   DocumentRecordType,
   PageRecordType,
@@ -20,19 +19,13 @@ import {
   setUserPreferences,
 } from "@tldraw/tldraw";
 import { useEffect, useMemo, useState } from "react";
-import { YKeyValue } from "y-utility/y-keyvalue";
-import * as Y from "yjs";
-import LiveblocksProvider from "@liveblocks/yjs";
 import { useRoom } from "@/liveblocks.config";
 import { LiveMap } from "@liveblocks/client";
-import { node } from "prop-types";
 
-export function useYjsStore({
-  roomId = "example",
+export function useStorageStore({
   shapeUtils = [],
 }: Partial<{
   hostUrl: string;
-  roomId: string;
   version: number;
   shapeUtils: TLAnyShapeUtilConstructor[];
 }>) {
@@ -174,6 +167,7 @@ export function useYjsStore({
       // === PRESENCE ===================================================
 
       const connectionId = `${room.getSelf()?.connectionId || 0}`;
+      console.log("conenction id is", connectionId);
       setUserPreferences({ id: connectionId });
 
       const userPreferences = computed<{
@@ -202,10 +196,15 @@ export function useYjsStore({
       room.updatePresence({ presence: presenceDerivation.value });
 
       // When the derivation change, sync presence to yjs awareness
-      unsubs.room_my_presence = react("when presence changes", () => {
+
+      unsubs.room_my_presence = react("when presence changes", (e) => {
         // requestAnimationFrame(() => {
+        // setTimeout(() => {
         // console.log("update self?", presenceDerivation.value);
+
         room.updatePresence({ presence: presenceDerivation.value });
+
+        // });
         // });
       });
 
@@ -213,14 +212,6 @@ export function useYjsStore({
       unsubs.room_presence = room.subscribe("others", (others, event) => {
         const toRemove: TLInstancePresence["id"][] = [];
         const toPut: TLInstancePresence[] = [];
-
-        //console.log(event, others);
-        if (
-          `${event?.user?.connectionId || 0}` ===
-          `${room.getSelf()?.connectionId || 0}`
-        ) {
-          return;
-        }
 
         if (event.type === "leave") {
           if (event.user.connectionId) {
@@ -230,9 +221,15 @@ export function useYjsStore({
           }
         } else if (event.type !== "reset") {
           const presence = event?.user?.presence;
-          if (presence) {
+          if (presence?.presence) {
             toPut.push(...Object.values(event.user.presence));
           }
+        } else {
+          others.forEach((other) => {
+            toRemove.push(
+              InstancePresenceRecordType.createId(`${other.connectionId}`)
+            );
+          });
         }
 
         // put / remove the records in the store
@@ -241,6 +238,8 @@ export function useYjsStore({
           if (toPut.length) store.put(toPut);
         });
       });
+
+      // === END PRESENCE =======================================================
 
       setStoreWithStatus({
         store,
@@ -254,7 +253,7 @@ export function useYjsStore({
     return () => {
       Object.values(unsubs).forEach((unsub) => unsub());
     };
-  }, [room]);
+  }, [store, room]);
 
   return storeWithStatus;
 }

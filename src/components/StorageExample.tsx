@@ -1,12 +1,10 @@
 "use client";
 
 import { Tldraw, track, useEditor } from "@tldraw/tldraw";
-import { useYjsStore } from "./useYjsStore";
+import { useStorageStore } from "./useStorageStore";
 
-export function YjsExample() {
-  const store = useYjsStore({
-    roomId: "my-room",
-  });
+export function StorageExample() {
+  const store = useStorageStore({});
 
   return (
     <div className="tldraw__editor">
