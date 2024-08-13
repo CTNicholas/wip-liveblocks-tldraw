@@ -8,14 +8,12 @@ import {
   createPresenceStateDerivation,
   createTLStore,
   defaultShapeUtils,
-  defaultUserPreferences,
   react,
   transact,
 } from "@tldraw/tldraw";
 import { useEffect, useMemo, useState } from "react";
 import { YKeyValue } from "y-utility/y-keyvalue";
 import * as Y from "yjs";
-// import LiveblocksProvider from "@liveblocks/yjs";
 import { LiveblocksYjsProvider } from "@liveblocks/yjs";
 
 import { useRoom } from "@/liveblocks.config";
@@ -150,7 +148,6 @@ export function useYjsStore({
         };
       });
 
-      // TODO - Confirm if this is the proper yClientId. Absolutely not sure
       const self = liveblocksRoom.getSelf();
       // @ts-ignore
       const yClientId = self?.presence.__yjs_clientid;
@@ -159,9 +156,6 @@ export function useYjsStore({
       const presenceDerivation =
         createPresenceStateDerivation(userPreferences)(store);
 
-      // Set our initial presence from the derivation's current value
-      // This seemingly works but the typing is a mismatch between JsonObject and TLInstancePresence.
-      // Not sure if that's a problem or not
       room.awareness.setLocalStateField(
         "presence",
         // @ts-ignore
