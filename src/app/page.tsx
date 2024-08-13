@@ -1,10 +1,10 @@
 import Room from "./Room";
-import { YjsExample } from "@/components/YjsExample";
+import { StorageExample } from "@/components/StorageExample";
 
 export default function Home() {
   return (
     <Room>
-      <YjsExample />
+      <StorageExample />
     </Room>
   );
 }
