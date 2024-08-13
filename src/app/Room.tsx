@@ -8,7 +8,7 @@ import { Loading } from "@/components/Loading";
 export default function Room({ children }: { children: ReactNode }) {
   return (
     <RoomProvider
-      id={"my-liveblocks-room"}
+      id={"my-liveblocks-yjs-room"}
       initialPresence={{}}
       initialStorage={{}}
     >
