@@ -9,15 +9,13 @@ import {
   createTLStore,
   defaultShapeUtils,
   react,
-  PageRecordType,
+  PageRecordType, IndexKey,
 } from "@tldraw/tldraw";
 import { useEffect, useMemo, useState } from "react";
 
 import { useRoom } from "@/liveblocks.config";
 import {
   DocumentRecordType,
-  getUserPreferences,
-  setUserPreferences,
   TLDocument,
   TLPageId,
   TLStoreEventInfo,
@@ -25,12 +23,10 @@ import {
 import { LiveMap } from "@liveblocks/core";
 
 export function useStorageStore({
-  roomId = "my-liveblocks-room",
   shapeUtils = [],
   user,
 }: Partial<{
   hostUrl: string;
-  roomId: string;
   version: number;
   shapeUtils: TLAnyShapeUtilConstructor[];
   user: {
@@ -77,7 +73,7 @@ export function useStorageStore({
         });
       } else {
         // Initialize store with records from storage
-        //store.clear();
+        store.clear();
         store.put(
           [
             DocumentRecordType.create({
@@ -86,7 +82,7 @@ export function useStorageStore({
             PageRecordType.create({
               id: "page:page" as TLPageId,
               name: "Page 1",
-              index: "a1",
+              index: "a1" as IndexKey,
             }),
             ...[...recordsSnapshot.values()],
           ],
@@ -159,7 +155,7 @@ export function useStorageStore({
               } else {
                 const curr = update.node.get(id);
                 if (curr) {
-                  toPut.push(curr as TLRecord);
+                  toPut.push(curr as any as TLRecord);
                 }
               }
             }
@@ -196,30 +192,18 @@ export function useStorageStore({
         };
       });
 
-      // TODO - Confirm if this is the proper yClientId. Absolutely not sure
-      const self = room.getSelf();
-      // @ts-ignore
-      const yClientId = "" + self?.connectionId;
-      const presenceId = InstancePresenceRecordType.createId(yClientId);
-
       const presenceDerivation =
         createPresenceStateDerivation(userPreferences)(store);
 
-      // Set our initial presence from the derivation's current value
-      // This seemingly works but the typing is a mismatch between JsonObject and TLInstancePresence.
-      // Not sure if that's a problem or not
      room.updatePresence({
-        // @ts-ignore
         presence: presenceDerivation.get() ?? null
       });
 
-      // When the derivation change, sync presence to to yjs awareness
+      // When the derivation change, sync presence to presence
       unsubs.push(
         react("when presence changes", () => {
           const presence = presenceDerivation.get() ?? null;
           requestAnimationFrame(() => {
-            // See above for ts-ignore comments.
-            // @ts-ignore
             room.updatePresence({ presence })
           });
         })
@@ -266,18 +250,7 @@ export function useStorageStore({
       });
     }
 
-
     setup();
-
-
-
-
-      setStoreWithStatus({
-        store,
-        status: "synced-remote",
-        connectionStatus: "online",
-      });
-
 
     return () => {
       unsubs.forEach((fn) => fn());

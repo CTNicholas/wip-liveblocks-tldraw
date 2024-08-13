@@ -1,5 +1,5 @@
 "use client";
-\
+
 import "tldraw/tldraw.css";
 import { Tldraw } from "@tldraw/tldraw";
 import { useStorageStore } from "./useStorageStore";
@@ -11,7 +11,6 @@ export function StorageExample() {
     name: "Alice",
   };
   const store = useStorageStore({
-    roomId: "my-room",
     user: currentUser,
   });
 

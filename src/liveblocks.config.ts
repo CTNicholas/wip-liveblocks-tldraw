@@ -13,6 +13,7 @@ const client = createClient({
 type Presence = {
   // cursor: { x: number, y: number } | null,
   // ...
+  presence: any;
 };
 
 // Optionally, Storage represents the shared document that persists in the
@@ -55,9 +56,6 @@ export const {
     useEventListener,
     useErrorListener,
     useStorage,
-    useObject,
-    useMap,
-    useList,
     useBatch,
     useHistory,
     useUndo,
