@@ -1,5 +1,6 @@
-import { createClient } from "@liveblocks/client";
+import { createClient, LiveList, LiveMap } from "@liveblocks/client";
 import { createRoomContext } from "@liveblocks/react";
+import { TLRecord } from "@tldraw/tldraw";
 
 const client = createClient({
   authEndpoint: "/api/liveblocks-auth",
@@ -21,6 +22,8 @@ type Presence = {
 type Storage = {
   // author: LiveObject<{ firstName: string, lastName: string }>,
   // ...
+  records: LiveMap<string, TLRecord>
+
 };
 
 // Optionally, UserMeta represents static/readonly metadata on each user, as

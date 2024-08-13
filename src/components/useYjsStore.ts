@@ -12,12 +12,20 @@ import {
   getUserPreferences,
   react,
   transact,
+  TLStoreEventInfo,
+  DocumentRecordType,
+  PageRecordType,
+  TLPageId,
+  TLDocument,
+  setUserPreferences,
 } from "@tldraw/tldraw";
 import { useEffect, useMemo, useState } from "react";
 import { YKeyValue } from "y-utility/y-keyvalue";
 import * as Y from "yjs";
 import LiveblocksProvider from "@liveblocks/yjs";
 import { useRoom } from "@/liveblocks.config";
+import { LiveMap } from "@liveblocks/client";
+import { node } from "prop-types";
 
 export function useYjsStore({
   roomId = "example",
@@ -28,6 +36,8 @@ export function useYjsStore({
   version: number;
   shapeUtils: TLAnyShapeUtilConstructor[];
 }>) {
+  const room = useRoom();
+
   const [store] = useState(() => {
     const store = createTLStore({
       shapeUtils: [...defaultShapeUtils, ...shapeUtils],
@@ -39,94 +49,132 @@ export function useYjsStore({
     status: "loading",
   });
 
-  const liveblocksRoom = useRoom();
-
-  const { yDoc, yStore, room } = useMemo(() => {
-    const yDoc = new Y.Doc({ gc: true });
-    const yArr = yDoc.getArray<{ key: string; val: TLRecord }>(`tl_${roomId}`);
-    const yStore = new YKeyValue(yArr);
-
-    return {
-      yDoc,
-      yStore,
-      room: new LiveblocksProvider(liveblocksRoom, yDoc),
-    };
-  }, [liveblocksRoom, roomId]);
-
   useEffect(() => {
-    setStoreWithStatus({ status: "loading" });
+    const unsubs: Record<string, () => void> = {};
 
-    const unsubs: (() => void)[] = [];
+    async function setup() {
+      if (!room) return;
 
-    function handleSync() {
-      // 1.
-      // Connect store to yjs store and vis versa, for both the document and awareness
+      const storage = await room.getStorage();
 
-      /* -------------------- Document -------------------- */
+      const recordsSnapshot = room.getStorageSnapshot()?.get("records");
 
-      // Sync store changes to the yjs doc
-      unsubs.push(
-        store.listen(
-          function syncStoreChangesToYjsDoc({ changes }) {
-            yDoc.transact(() => {
-              Object.values(changes.added).forEach((record) => {
-                yStore.set(record.id, record);
-              });
+      if (!recordsSnapshot) {
+        // Initialize storage with records from store
+        storage.root.set("records", new LiveMap());
+        const liveRecords = storage.root.get("records");
+        room.batch(() => {
+          store.allRecords().forEach((record) => {
+            liveRecords.set(record.id, record);
+          });
+        });
+      } else {
+        // Initialize store with records from storage
+        store.clear();
+        store.put(
+          [
+            DocumentRecordType.create({
+              id: "document:document" as TLDocument["id"],
+            }),
+            PageRecordType.create({
+              id: "page:page" as TLPageId,
+              name: "Page 1",
+              index: "a1",
+            }),
+            ...[...recordsSnapshot.values()],
+          ],
+          "initialize"
+        );
+      }
 
-              Object.values(changes.updated).forEach(([_, record]) => {
-                yStore.set(record.id, record);
-              });
+      const liveRecords = storage.root.get("records");
 
-              Object.values(changes.removed).forEach((record) => {
-                yStore.delete(record.id);
-              });
+      // Sync store changes with room document
+      unsubs.store_document = store.listen(
+        ({ changes }: TLStoreEventInfo) => {
+          room.batch(() => {
+            Object.values(changes.added).forEach((record) => {
+              liveRecords.set(record.id, record);
             });
-          },
-          { source: "user", scope: "document" } // only sync user's document changes
-        )
+
+            Object.values(changes.updated).forEach(([_, record]) => {
+              liveRecords.set(record.id, record);
+            });
+
+            Object.values(changes.removed).forEach((record) => {
+              liveRecords.delete(record.id);
+            });
+          });
+        },
+        { source: "user", scope: "document" }
       );
 
-      // Sync the yjs doc changes to the store
-      const handleChange = (
-        changes: Map<
-          string,
-          | { action: "delete"; oldValue: TLRecord }
-          | { action: "update"; oldValue: TLRecord; newValue: TLRecord }
-          | { action: "add"; newValue: TLRecord }
-        >,
-        transaction: Y.Transaction
-      ) => {
-        if (transaction.local) return;
+      // Sync store changes with room presence
+      function syncStoreWithPresence({ changes }: TLStoreEventInfo) {
+        room.batch(() => {
+          Object.values(changes.added).forEach((record) => {
+            room.updatePresence({ [record.id]: record });
+          });
 
-        const toRemove: TLRecord["id"][] = [];
-        const toPut: TLRecord[] = [];
+          Object.values(changes.updated).forEach(([_, record]) => {
+            room.updatePresence({ [record.id]: record });
+          });
 
-        changes.forEach((change, id) => {
-          switch (change.action) {
-            case "add":
-            case "update": {
-              const record = yStore.get(id)!;
-              toPut.push(record);
-              break;
+          Object.values(changes.removed).forEach((record) => {
+            room.updatePresence({ [record.id]: null });
+          });
+        });
+      }
+
+      unsubs.store_session = store.listen(syncStoreWithPresence, {
+        source: "user",
+        scope: "session",
+      });
+
+      unsubs.store_presence = store.listen(syncStoreWithPresence, {
+        source: "user",
+        scope: "presence",
+      });
+
+      unsubs.room_document = room.subscribe(
+        liveRecords,
+        (storageChanges) => {
+          const toRemove: TLRecord["id"][] = [];
+          const toPut: TLRecord[] = [];
+
+          for (const update of storageChanges) {
+            if (update.type !== "LiveMap") {
+              return;
             }
-            case "delete": {
-              toRemove.push(id as TLRecord["id"]);
-              break;
+            for (const [id, { type }] of Object.entries(update.updates)) {
+              if (type === "delete") {
+                toRemove.push(id as TLRecord["id"]);
+              } else {
+                const curr = update.node.get(id);
+                if (curr) {
+                  toPut.push(curr as TLRecord);
+                }
+              }
             }
           }
-        });
 
-        // put / remove the records in the store
-        store.mergeRemoteChanges(() => {
-          if (toRemove.length) store.remove(toRemove);
-          if (toPut.length) store.put(toPut);
-        });
-      };
+          // Push changes to tldraw
+          store.mergeRemoteChanges(() => {
+            if (toRemove.length) {
+              store.remove(toRemove);
+            }
+            if (toPut.length) {
+              store.put(toPut);
+            }
+          });
+        },
+        { isDeep: true }
+      );
 
-      yStore.on("change", handleChange);
-      unsubs.push(() => yStore.off("change", handleChange));
+      // === PRESENCE ===================================================
 
-      /* -------------------- Awareness ------------------- */
+      const connectionId = `${room.getSelf()?.connectionId || 0}`;
+      setUserPreferences({ id: connectionId });
 
       const userPreferences = computed<{
         id: string;
@@ -142,57 +190,49 @@ export function useYjsStore({
       });
 
       // Create the instance presence derivation
-      const yClientId = room.awareness.clientID.toString();
-      const presenceId = InstancePresenceRecordType.createId(yClientId);
-      const presenceDerivation =
-        createPresenceStateDerivation(userPreferences)(store);
+      const presenceId = InstancePresenceRecordType.createId(connectionId);
+      const presenceDerivation = createPresenceStateDerivation(
+        userPreferences,
+        presenceId
+      )(store);
+
+      console.log(presenceDerivation.value);
 
       // Set our initial presence from the derivation's current value
-      room.awareness.setLocalStateField("presence", presenceDerivation.value);
+      room.updatePresence({ presence: presenceDerivation.value });
 
-      // When the derivation change, sync presence to to yjs awareness
-      unsubs.push(
-        react("when presence changes", () => {
-          const presence = presenceDerivation.value;
-          requestAnimationFrame(() => {
-            room.awareness.setLocalStateField("presence", presence);
-          });
-        })
-      );
+      // When the derivation change, sync presence to yjs awareness
+      unsubs.room_my_presence = react("when presence changes", () => {
+        // requestAnimationFrame(() => {
+        // console.log("update self?", presenceDerivation.value);
+        room.updatePresence({ presence: presenceDerivation.value });
+        // });
+      });
 
-      // Sync yjs awareness changes to the store
-      const handleUpdate = (update: {
-        added: number[];
-        updated: number[];
-        removed: number[];
-      }) => {
-        const states = room.awareness.getStates() as Map<
-          number,
-          { presence: TLInstancePresence }
-        >;
-
+      // Sync room presence changes with the store
+      unsubs.room_presence = room.subscribe("others", (others, event) => {
         const toRemove: TLInstancePresence["id"][] = [];
         const toPut: TLInstancePresence[] = [];
 
-        // Connect records to put / remove
-        for (const clientId of update.added) {
-          const state = states.get(clientId);
-          if (state?.presence && state.presence.id !== presenceId) {
-            toPut.push(state.presence);
-          }
+        //console.log(event, others);
+        if (
+          `${event?.user?.connectionId || 0}` ===
+          `${room.getSelf()?.connectionId || 0}`
+        ) {
+          return;
         }
 
-        for (const clientId of update.updated) {
-          const state = states.get(clientId);
-          if (state?.presence && state.presence.id !== presenceId) {
-            toPut.push(state.presence);
+        if (event.type === "leave") {
+          if (event.user.connectionId) {
+            toRemove.push(
+              InstancePresenceRecordType.createId(`${event.user.connectionId}`)
+            );
           }
-        }
-
-        for (const clientId of update.removed) {
-          toRemove.push(
-            InstancePresenceRecordType.createId(clientId.toString())
-          );
+        } else if (event.type !== "reset") {
+          const presence = event?.user?.presence;
+          if (presence) {
+            toPut.push(...Object.values(event.user.presence));
+          }
         }
 
         // put / remove the records in the store
@@ -200,31 +240,7 @@ export function useYjsStore({
           if (toRemove.length) store.remove(toRemove);
           if (toPut.length) store.put(toPut);
         });
-      };
-
-      room.awareness.on("update", handleUpdate);
-      unsubs.push(() => room.awareness.off("update", handleUpdate));
-
-      // 2.
-      // Initialize the store with the yjs doc records—or, if the yjs doc
-      // is empty, initialize the yjs doc with the default store records.
-      if (yStore.yarray.length) {
-        // Replace the store records with the yjs doc records
-        transact(() => {
-          // The records here should be compatible with what's in the store
-          store.clear();
-          const records = yStore.yarray.toJSON().map(({ val }) => val);
-          store.put(records);
-        });
-      } else {
-        // Create the initial store records
-        // Sync the store records to the yjs doc
-        yDoc.transact(() => {
-          for (const record of store.allRecords()) {
-            yStore.set(record.id, record);
-          }
-        });
-      }
+      });
 
       setStoreWithStatus({
         store,
@@ -233,45 +249,12 @@ export function useYjsStore({
       });
     }
 
-    // Replaced the code below with these two lines - Chris
-    room.on("synced", handleSync);
-    unsubs.push(() => room.off("synced", handleSync));
-
-    // let hasConnectedBefore = false;
-
-    // function handleStatusChange({
-    //   status = "connected",
-    // }: {
-    //   status: "disconnected" | "connected";
-    // }) {
-    //   // If we're disconnected, set the store status to 'synced-remote' and the connection status to 'offline'
-    //   if (status === "disconnected") {
-    //     setStoreWithStatus({
-    //       store,
-    //       status: "synced-remote",
-    //       connectionStatus: "offline",
-    //     });
-    //     return;
-    //   }
-    //
-    //   room.off("synced", handleSync);
-    //
-    //   if (status === "connected") {
-    //     if (hasConnectedBefore) return;
-    //     hasConnectedBefore = true;
-    //     room.on("synced", handleSync);
-    //     unsubs.push(() => room.off("synced", handleSync));
-    //   }
-    // }
-    //
-    // room.on("status", handleStatusChange);
-    // unsubs.push(() => room.off("status", handleStatusChange));
+    setup();
 
     return () => {
-      unsubs.forEach((fn) => fn());
-      unsubs.length = 0;
+      Object.values(unsubs).forEach((unsub) => unsub());
     };
-  }, [room, yDoc, store, yStore]);
+  }, [room]);
 
   return storeWithStatus;
 }
